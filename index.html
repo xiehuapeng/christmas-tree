@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grand Luxury Tree Final v2 (Compressed + LocalStorage)</title>
+  <title>Grand Luxury Tree (Repo Defaults + Compressed Upload + LocalStorage)</title>
 
   <style>
     body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Times New Roman', serif; }
@@ -17,7 +17,6 @@
       padding-top: 40px;
       box-sizing: border-box;
     }
-
     .ui-hidden { opacity: 0; pointer-events: none !important; }
 
     #loader {
@@ -123,7 +122,7 @@
       </label>
       <div class="hint-text">
         Press 'H' to Hide Controls<br/>
-        (Images will be compressed before saving)
+        (Repo default photos + compressed uploads + remembered)
       </div>
     </div>
   </div>
@@ -141,10 +140,24 @@
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
     import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-    // =========================
-    // LocalStorage 持久化配置
-    // =========================
-    const STORAGE_KEY = 'christmas_tree_photos_v2_compressed';
+    // =========================================================
+    // ① 仓库内置默认照片（请按你的文件名修改）
+    // =========================================================
+    // 你需要在仓库里创建：assets/photos/01.jpg 等文件
+    const DEFAULT_PHOTOS = [
+      "assets/photos/01.jpg",
+      "assets/photos/02.jpg",
+      "assets/photos/03.jpg",
+      "assets/photos/04.jpg",
+	  "assets/photos/05.jpg",
+	  "assets/photos/06.jpg"
+      // ... 继续加
+    ];
+
+    // =========================================================
+    // ② LocalStorage 持久化（用户上传的照片会记住）
+    // =========================================================
+    const STORAGE_KEY = 'christmas_tree_photos_v3_repo_defaults_plus_uploads';
 
     function getStoredPhotos() {
       try {
@@ -160,24 +173,18 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
     }
 
-    // =========================
-    // 上传前压缩配置（你可改）
-    // =========================
+    // =========================================================
+    // ③ 上传前压缩配置（你可改）
+    // =========================================================
     const COMPRESS = {
       maxSide: 1280,      // 最长边 <= 1280px（建议 1024~1600）
       quality: 0.78,      // JPEG 质量（0.6~0.85）
-      mime: 'image/jpeg'  // 存为 jpeg 更省空间
+      mime: 'image/jpeg'  // 用 jpeg 更省空间
     };
 
-    // 将 File 压缩为 base64(dataURL)
     async function compressImageFileToDataURL(file, { maxSide, quality, mime }) {
-      // 用 createImageBitmap 优先（更快），不支持则 fallback
       let bitmap = null;
-      try {
-        bitmap = await createImageBitmap(file);
-      } catch {
-        bitmap = null;
-      }
+      try { bitmap = await createImageBitmap(file); } catch { bitmap = null; }
 
       let w, h;
       let drawSource;
@@ -187,7 +194,6 @@
         h = bitmap.height;
         drawSource = bitmap;
       } else {
-        // fallback: 用 <img> 加载
         const dataURL = await readFileAsDataURL(file);
         const img = await loadImage(dataURL);
         w = img.naturalWidth || img.width;
@@ -195,7 +201,6 @@
         drawSource = img;
       }
 
-      // 计算缩放
       const longSide = Math.max(w, h);
       let scale = 1;
       if (longSide > maxSide) scale = maxSide / longSide;
@@ -208,22 +213,17 @@
       canvas.height = targetH;
 
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
-      // 让缩放更平滑
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
+      // 如果你想白底，把下面两行取消注释：
+      // ctx.fillStyle = '#ffffff';
+      // ctx.fillRect(0, 0, targetW, targetH);
+
       ctx.drawImage(drawSource, 0, 0, targetW, targetH);
 
-      // 如果原图是 PNG/含透明，转 JPEG 会变黑底/白底问题：
-      // 我们已 alpha:false，这里背景为黑；你想白底可先填白
-      // ctx.fillStyle = '#000'; ctx.fillRect(0,0,targetW,targetH); 再 drawImage
-
-      // 输出 dataURL（压缩后的）
       const out = canvas.toDataURL(mime, quality);
-
-      // 释放 bitmap
       if (bitmap) bitmap.close?.();
-
       return out;
     }
 
@@ -286,15 +286,16 @@
       createParticles();
       createDust();
 
-      // ✅ 启动时恢复 LocalStorage 的照片
-      const stored = getStoredPhotos();
+      // =========================================================
+      // ✅ 初始化：先加载仓库默认照片，再加载用户上传照片（叠加）
+      // =========================================================
+      loadDefaultPhotosFromRepo();          // 默认照片（GitHub 仓库里）
+      const stored = getStoredPhotos();     // 用户历史上传
       if (stored.length > 0) loadPhotosFromStorage(stored);
-      else createDefaultPhotos();
 
       setupPostProcessing();
       setupEvents();
 
-      // MediaPipe 初始化失败也不阻塞页面（避免一直 loading）
       try {
         await initMediaPipe();
       } catch (err) {
@@ -543,22 +544,6 @@
       }
     }
 
-    function createDefaultPhotos() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512; canvas.height = 512;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, 512, 512);
-      ctx.strokeStyle = '#eebb66'; ctx.lineWidth = 15; ctx.strokeRect(20, 20, 472, 472);
-      ctx.font = '500 60px Times New Roman'; ctx.fillStyle = '#eebb66';
-      ctx.textAlign = 'center';
-      ctx.fillText("JOYEUX", 256, 230);
-      ctx.fillText("NOEL", 256, 300);
-
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      addPhotoToScene(tex);
-    }
-
     function addPhotoToScene(texture) {
       const frameGeo = new THREE.BoxGeometry(1.4, 1.4, 0.05);
       const frameMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.champagneGold, metalness: 1.0, roughness: 0.1 });
@@ -579,6 +564,26 @@
       particleSystem.push(new Particle(group, 'PHOTO', false));
     }
 
+    // =========================================================
+    // 默认照片：从仓库静态资源加载（相对路径）
+    // =========================================================
+    function loadDefaultPhotosFromRepo() {
+      DEFAULT_PHOTOS.forEach((url) => {
+        new THREE.TextureLoader().load(
+          url,
+          (t) => {
+            t.colorSpace = THREE.SRGBColorSpace;
+            addPhotoToScene(t);
+          },
+          undefined,
+          (err) => console.warn('Failed to load default photo:', url, err)
+        );
+      });
+    }
+
+    // =========================================================
+    // 用户照片：从 LocalStorage base64 恢复
+    // =========================================================
     function loadPhotosFromStorage(storedBase64List) {
       storedBase64List.forEach(base64 => {
         new THREE.TextureLoader().load(base64, (t) => {
@@ -588,37 +593,31 @@
       });
     }
 
-    // =========================
-    // 上传：压缩 -> 存储 -> 显示
-    // =========================
+    // =========================================================
+    // 上传：压缩 -> 存储 -> 显示（叠加）
+    // =========================================================
     async function handleImageUpload(e) {
       const files = e.target.files;
       if (!files || !files.length) return;
 
-      // 读取已存列表
       const stored = getStoredPhotos();
 
-      // 顺序处理（避免同时压缩多张爆内存）
       for (const file of Array.from(files)) {
         try {
           const base64 = await compressImageFileToDataURL(file, COMPRESS);
 
-          // 存储前做容量保护：超过 localStorage 限制会抛异常
           stored.push(base64);
           setStoredPhotos(stored);
 
-          // 显示到场景
           new THREE.TextureLoader().load(base64, (t) => {
             t.colorSpace = THREE.SRGBColorSpace;
             addPhotoToScene(t);
           });
         } catch (err) {
           console.warn('Compress/store failed for file:', file?.name, err);
-          // 不阻塞其他图片继续处理
         }
       }
 
-      // 清空 input，方便重复选同一张
       e.target.value = '';
     }
 
